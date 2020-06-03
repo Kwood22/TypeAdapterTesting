@@ -14,24 +14,37 @@ import RxSwift
 class ViewController: UIViewController {
     @IBOutlet weak var DisplayLabel: UILabel!
     private let disposeBag = DisposeBag()
-    
+
     override func viewDidLoad() {
         super.viewDidLoad()
         // Do any additional setup after loading the view.
         let headers: HTTPHeaders = [
-            "Content-type": "application/json","x-rapidapi-host": "contractdetails.p.rapidapi.com","x-rapidapi-key": "c85041cdb3msh0dd1fbea0b44d29p1ec983jsn391cb2d9243a","X-RapidAPI-Proxy-Secret": "8b5b0950-a574-11ea-81b1-d32e6e935253"
+            "Content-type": "application/json", "x-rapidapi-host": "contractdetails.p.rapidapi.com", "x-rapidapi-key": "c85041cdb3msh0dd1fbea0b44d29p1ec983jsn391cb2d9243a", "X-RapidAPI-Proxy-Secret": "8b5b0950-a574-11ea-81b1-d32e6e935253"
         ]
 
         AF.request("https://contractdetails.p.rapidapi.com/contract", headers: headers).responseDecodable(of: ProductDetail.Contract.self) { response in
             debugPrint(response)
+            switch response.result {
+            case .success(let contract):
+                let productID: Int  = (contract.tables.first?.cards.first as? ProductDetail.BankTableCard)?.data.productId ?? -1
+                self.DisplayLabel.text = "\(productID)"
+            case .failure:
+                print("Error")
+            }
         }
-        
+
         AF.request("https://contractdetails.p.rapidapi.com/contract", headers: headers).responseJSON { response in
             debugPrint(response)
         }
     }
 
 
+}
+
+protocol TableCard: Codable {
+    var heading: String {get}
+    var type: ProductDetail.TableType {get}
+    var details: [ProductDetail.TableDetail] {get}
 }
 
 public enum ProductDetail {
@@ -45,8 +58,8 @@ public enum ProductDetail {
         case inactive = "INACTIVE"
         case paidUp = "PAID_UP"
     }
-    
-    public enum TableType: String, Codable {
+
+    public enum TableType: String, Codable, Equatable {
         case bankDetail = "BANK_DETAILS"
         case beneficary = "BENEFICIARY"
     }
@@ -65,13 +78,65 @@ public enum ProductDetail {
 
     struct TableSection: Codable {
         let heading: String?
-        let cards: [TableCard]
+        var cards: [TableCard]
+
+        private enum CodingKeys: String, CodingKey {
+            case heading, cards
+        }
+
+        enum TablesTypeKey: CodingKey {
+            case type
+        }
+
+        init(from decoder: Decoder) throws {
+            let values = try decoder.container(keyedBy: CodingKeys.self)
+            heading = try values.decode(String.self, forKey: .heading)
+
+            var cardsArrayForType = try values.nestedUnkeyedContainer(forKey: .cards)
+            var cards = [TableCard]()
+            var unDecodedCardArray = cardsArrayForType
+
+            while(!cardsArrayForType.isAtEnd) {
+                let unDecodedCard = try cardsArrayForType.nestedContainer(keyedBy: TablesTypeKey.self)
+                let type = try unDecodedCard.decode(ProductDetail.TableType.self, forKey: TablesTypeKey.type)
+                switch type {
+                case .bankDetail:
+                    cards.append(try unDecodedCardArray.decode(BankTableCard.self))
+                case .beneficary:
+                    cards.append(try unDecodedCardArray.decode(BeneficiaryTableCard.self))
+                }
+            }
+            self.cards = cards
+        }
+
+        func encode(to encoder: Encoder) throws {
+        }
     }
 
-    struct TableCard: Codable {
-        let headings: [String]
-        let type: TableType
-        let details: [TableDetail]
+    class BankTableCard: TableCard {
+        var heading: String
+        var type: ProductDetail.TableType
+        var details: [ProductDetail.TableDetail]
+        let data: BankMetaData
+    }
+
+    class BeneficiaryTableCard: TableCard {
+        let data: BenaficaryMetaData
+        var heading: String
+        var type: ProductDetail.TableType
+        var details: [ProductDetail.TableDetail]
+    }
+
+    struct BankMetaData: Codable {
+        let productId: Int
+        let contractId: Int
+        let bankCode: Int
+    }
+
+    struct BenaficaryMetaData: Codable {
+        let contractStartDay: String
+        let contractDurationYears: Int
+        let contractEmergencyContactNumber: String
     }
 
     struct TableDetail: Codable {
